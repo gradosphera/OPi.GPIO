@@ -5,8 +5,6 @@
 import threading
 import select
 
-from select import EPOLLIN, EPOLLET, EPOLLPRI
-
 from OPi.constants import NONE, RISING, FALLING, BOTH
 from OPi import sysfs
 
@@ -51,21 +49,17 @@ class _worker(threading.Thread):
             initial_edge = True
 
             with sysfs.value_descriptor(self._pin) as fd:
-                e = select.epoll()
-                e.register(fd, EPOLLIN | EPOLLET | EPOLLPRI)
                 try:
                     while not self._finished:
-                        events = e.poll(0.1, maxevents=1)
+                        events, _, _ = select.select([fd], [], [], 0.1)
                         if initial_edge:
                             initial_edge = False
                         elif len(events) > 0:
                             with self._lock:
                                 self._event_detected = True
                                 self.notify_callbacks()
-
                 finally:
-                    e.unregister(fd)
-                    e.close()
+                    pass
 
         except BaseException as e:
             self.exc = e
@@ -98,12 +92,10 @@ def blocking_wait_for_edge(pin, trigger, timeout=-1):
         initial_edge = True
 
         with sysfs.value_descriptor(pin) as fd:
-            e = select.epoll()
-            e.register(fd, EPOLLIN | EPOLLET | EPOLLPRI)
             try:
                 while not finished:
                     # TODO: implement bouncetime
-                    events = e.poll(timeout / 1000.0, maxevents=1)
+                    events, _, _ = select.select([fd], [], [], timeout / 1000.0)
                     if initial_edge:
                         initial_edge = False
                     else:
@@ -115,8 +107,7 @@ def blocking_wait_for_edge(pin, trigger, timeout=-1):
                 else:
                     return pin
             finally:
-                e.unregister(fd)
-                e.close()
+                pass
 
     finally:
         sysfs.edge(pin, NONE)

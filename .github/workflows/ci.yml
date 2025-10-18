@@ -38,8 +38,8 @@ jobs:
         env:
           TOXENV: ${{ matrix.env.TOXENV || format('py{0}', matrix.python-version) }}
 
-      - name: Upload coverage to Coveralls
-        if: success()
+      - name: Upload coverage to Coveralls (only for 3.11)
+        if: matrix.python-version == '3.11' && success()
         run: coveralls
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

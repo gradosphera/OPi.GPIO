@@ -5,6 +5,8 @@
 import threading
 import select
 
+from select import EPOLLIN, EPOLLET, EPOLLPRI
+
 from OPi.constants import NONE, RISING, FALLING, BOTH
 from OPi import sysfs
 
@@ -49,17 +51,21 @@ class _worker(threading.Thread):
             initial_edge = True
 
             with sysfs.value_descriptor(self._pin) as fd:
+                e = select.epoll()
+                e.register(fd, EPOLLIN | EPOLLET | EPOLLPRI)
                 try:
                     while not self._finished:
-                        events, _, _ = select.select([fd], [], [], 0.1)
+                        events = e.poll(0.1, maxevents=1)
                         if initial_edge:
                             initial_edge = False
                         elif len(events) > 0:
                             with self._lock:
                                 self._event_detected = True
                                 self.notify_callbacks()
+
                 finally:
-                    pass
+                    e.unregister(fd)
+                    e.close()
 
         except BaseException as e:
             self.exc = e
@@ -83,7 +89,9 @@ def blocking_wait_for_edge(pin, trigger, timeout=-1):
     assert trigger in [RISING, FALLING, BOTH]
 
     if pin in _threads:
-        raise RuntimeError("Conflicting edge detection events already exist for this GPIO channel")
+        raise RuntimeError(
+            "Conflicting edge detection events already exist for this GPIO channel"
+        )
 
     try:
         sysfs.edge(pin, trigger)
@@ -92,10 +100,12 @@ def blocking_wait_for_edge(pin, trigger, timeout=-1):
         initial_edge = True
 
         with sysfs.value_descriptor(pin) as fd:
+            e = select.epoll()
+            e.register(fd, EPOLLIN | EPOLLET | EPOLLPRI)
             try:
                 while not finished:
                     # TODO: implement bouncetime
-                    events, _, _ = select.select([fd], [], [], timeout / 1000.0)
+                    events = e.poll(timeout / 1000.0, maxevents=1)
                     if initial_edge:
                         initial_edge = False
                     else:
@@ -107,7 +117,8 @@ def blocking_wait_for_edge(pin, trigger, timeout=-1):
                 else:
                     return pin
             finally:
-                pass
+                e.unregister(fd)
+                e.close()
 
     finally:
         sysfs.edge(pin, NONE)
@@ -124,7 +135,9 @@ def add_edge_detect(pin, trigger, callback=None):
     assert trigger in [RISING, FALLING, BOTH]
 
     if pin in _threads:
-        raise RuntimeError("Conflicting edge detection already enabled for this GPIO channel")
+        raise RuntimeError(
+            "Conflicting edge detection already enabled for this GPIO channel"
+        )
 
     _threads[pin] = _worker(pin, trigger, callback)
     _threads[pin].start()
